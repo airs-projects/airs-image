@@ -1,15 +1,24 @@
 # airs-image
 
-`airs-magick` is a Rust compatibility entry point for ImageMagick's `magick`
-command. It preserves the full `magick` command surface by locating a real
-ImageMagick executable and forwarding every argument unchanged.
+`airs-magick` is a native Rust, ImageMagick-style image CLI. It does not call
+ImageMagick.
 
-Set `AIRS_IMAGE_MAGICK` when `magick` is not on `PATH`:
+Supported formats:
+
+- read: PNG, JPEG, WebP
+- write: PNG, JPEG, WebP
+
+Supported operations:
+
+- `-resize GEOMETRY`: `800x600`, `800x`, `x600`, `800x600!`, or `50%`
+- `-crop GEOMETRY`: `WIDTHxHEIGHT+X+Y`
+- `-rotate DEGREES`: `0`, `90`, `180`, or `270`
+- `-strip`: re-encode pixels only, dropping metadata
+- `-quality VALUE`: JPEG quality `1..=100`; accepted for PNG/WebP, but WebP is currently written lossless by the Rust encoder
+
+Examples:
 
 ```powershell
-$env:AIRS_IMAGE_MAGICK = 'C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe'
-airs-magick input.png -resize 320x200 output.jpg
+airs-magick input.png -resize 800x600 -quality 85 output.jpg
+airs-magick convert input.jpg -crop 400x300+20+10 -rotate 90 -strip output.webp
 ```
-
-Without ImageMagick installed, `airs-magick` exits with a clear configuration
-error.

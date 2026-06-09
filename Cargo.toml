@@ -8,3 +8,4 @@ name = "airs-magick"
 path = "src/main.rs"
 
 [dependencies]
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }

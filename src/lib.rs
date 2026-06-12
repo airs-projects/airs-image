@@ -1,11 +1,10 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
-use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageEncoder};
 
@@ -59,7 +58,7 @@ pub fn version() -> &'static str {
     VERSION
 }
 
-pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<(), String> {
+pub fn magick(args: impl IntoIterator<Item = OsString>) -> Result<(), String> {
     let plan = parse_args(args)?;
     execute(&plan)
 }
@@ -236,7 +235,7 @@ fn write_image(image: &DynamicImage, output: &Path, quality: u8) -> Result<(), S
     let format = output_format(output)?;
     let file = File::create(output)
         .map_err(|error| format!("{}: failed to create output: {error}", output.display()))?;
-    let writer = BufWriter::new(file);
+    let mut writer = BufWriter::new(file);
 
     match format {
         OutputFormat::Png => {
@@ -263,13 +262,13 @@ fn write_image(image: &DynamicImage, output: &Path, quality: u8) -> Result<(), S
         }
         OutputFormat::WebP => {
             let rgba = image.to_rgba8();
-            WebPEncoder::new_lossless(writer)
-                .write_image(
-                    &rgba,
-                    rgba.width(),
-                    rgba.height(),
-                    image::ExtendedColorType::Rgba8,
-                )
+            let encoded = webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height())
+                .encode_simple(false, f32::from(quality))
+                .map_err(|error| {
+                    format!("{}: failed to encode WebP: {error:?}", output.display())
+                })?;
+            writer
+                .write_all(&encoded)
                 .map_err(|error| format!("{}: failed to write WebP: {error}", output.display()))
         }
     }
@@ -395,7 +394,7 @@ pub fn print_usage() {
     println!("  -crop GEOMETRY     crop: WIDTHxHEIGHT+X+Y");
     println!("  -rotate DEGREES    rotate by 0, 90, 180, or 270 degrees");
     println!("  -strip             strip metadata by re-encoding pixels only");
-    println!("  -quality VALUE     JPEG quality 1..=100; accepted for other formats");
+    println!("  -quality VALUE     JPEG/WebP output quality 1..=100");
     println!("  -version           print version");
     println!("  -help              print this help");
 }
@@ -512,6 +511,70 @@ mod tests {
         execute(&plan).unwrap();
         let result = image::open(output).unwrap();
         assert_eq!(result.dimensions(), (4, 6));
+    }
+
+    #[test]
+    fn quality_changes_jpeg_output_size() {
+        let dir = temp_dir("airs-image-quality");
+        fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.png");
+        let low_quality = dir.join("low.jpg");
+        let high_quality = dir.join("high.jpg");
+
+        let mut image = RgbaImage::new(64, 64);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            *pixel = Rgba([(x * 3) as u8, (y * 5) as u8, ((x + y) * 2) as u8, 255]);
+        }
+        DynamicImage::ImageRgba8(image).save(&input).unwrap();
+
+        execute(&CommandPlan {
+            input: input.clone(),
+            output: low_quality.clone(),
+            operations: vec![Operation::Quality(10)],
+        })
+        .unwrap();
+        execute(&CommandPlan {
+            input,
+            output: high_quality.clone(),
+            operations: vec![Operation::Quality(95)],
+        })
+        .unwrap();
+
+        let low_size = fs::metadata(low_quality).unwrap().len();
+        let high_size = fs::metadata(high_quality).unwrap().len();
+        assert!(low_size < high_size);
+    }
+
+    #[test]
+    fn quality_changes_webp_output_size() {
+        let dir = temp_dir("airs-image-webp-quality");
+        fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.png");
+        let low_quality = dir.join("low.webp");
+        let high_quality = dir.join("high.webp");
+
+        let mut image = RgbaImage::new(64, 64);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            *pixel = Rgba([(x * 3) as u8, (y * 5) as u8, ((x + y) * 2) as u8, 255]);
+        }
+        DynamicImage::ImageRgba8(image).save(&input).unwrap();
+
+        execute(&CommandPlan {
+            input: input.clone(),
+            output: low_quality.clone(),
+            operations: vec![Operation::Quality(10)],
+        })
+        .unwrap();
+        execute(&CommandPlan {
+            input,
+            output: high_quality.clone(),
+            operations: vec![Operation::Quality(95)],
+        })
+        .unwrap();
+
+        let low_size = fs::metadata(low_quality).unwrap().len();
+        let high_size = fs::metadata(high_quality).unwrap().len();
+        assert!(low_size < high_size);
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
